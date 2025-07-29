@@ -6,6 +6,7 @@ use App\Extensions\OAuth\OAuthService;
 use App\Filament\Pages\Auth\EditProfile;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Setting;
 use App\Services\Users\UserUpdateService;
 use Exception;
 use Filament\Notifications\Notification;
@@ -76,16 +77,39 @@ class OAuthController extends Controller
 
             $this->auth->guard()->login($user, true);
         } catch (Exception) {
-            // No user found - redirect to normal login
+            $autocreate = $request->input('autocreate', false);
+
+            if ($autocreate) {
+                // Autocreate user as before
+                $userData = [
+                    'email' => $oauthUser->getEmail(),
+                    'username' => $oauthUser->getNickname() ?? $oauthUser->getName(),
+                    'oauth' => [
+                        $driver => $oauthUser->getId(),
+                    ],
+                ];
+            
+                $user = app(\App\Services\Users\UserCreationService::class)->handle($userData);
+                $this->auth->guard()->login($user, true);
+                return redirect('/');
+            }
+        
+            // Otherwise, notify and redirect to login (or return JSON for frontend)
+            if ($request->expectsJson()) {
+                // Let frontend know autocreation is possible
+                return response()->json([
+                    'error' => 'No linked User found',
+                    'autocreate_available' => true,
+                ], 404);
+            }
+        
             Notification::make()
                 ->title('No linked User found')
                 ->danger()
                 ->persistent()
                 ->send();
-
+        
             return redirect()->route('auth.login');
         }
-
-        return redirect('/');
     }
 }
